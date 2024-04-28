@@ -21,7 +21,7 @@ const createPlaylist = asyncHandler(async (req, res) => {
   });
 
   if (!playlist) {
-    throw new ApiError(500, "playlist creation is failed");
+    throw new ApiError(500, "Failed to create playlist");
   }
 
   return res
@@ -50,7 +50,7 @@ const getUserPlaylists = asyncHandler(async (req, res) => {
         from: "videos",
         localField: "videos",
         foreignField: "_id",
-        as: "videos",
+        as: "playlistVideos",
         pipeline: [
           {
             $match: {
@@ -64,10 +64,19 @@ const getUserPlaylists = asyncHandler(async (req, res) => {
     {
       $addFields: {
         totalVideos: {
-          $size: "$videos",
+          $size: "$playlistVideos",
         },
         totalViews: {
-          $sum: "$videos.views",
+          $sum: "$playlistVideos.views",
+        },
+        isOwner: {
+          $cond: {
+            if: {
+              $eq: [req.user?._id, "$owner"],
+            },
+            then: true,
+            else: false,
+          },
         },
       },
     },
@@ -79,7 +88,8 @@ const getUserPlaylists = asyncHandler(async (req, res) => {
         totalViews: 1,
         createdAt: 1,
         updatedAt: 1,
-        videos: {
+        isOwner: 1,
+        playlistVideos: {
           _id: 1,
           name: 1,
           description: 1,
@@ -148,7 +158,7 @@ const getPlaylistById = asyncHandler(async (req, res) => {
         from: "users",
         localField: "owner",
         foreignField: "_id",
-        as: "owner",
+        as: "ownerDetails",
       },
     },
     {
@@ -160,7 +170,16 @@ const getPlaylistById = asyncHandler(async (req, res) => {
           $sum: "$videos.views",
         },
         owner: {
-          $first: "$owner",
+          $first: "$ownerDetails",
+        },
+        isOwner: {
+          $cond: {
+            if: {
+              $in: [req.user?._id, "$ownerDetails._id"],
+            },
+            then: true,
+            else: false,
+          },
         },
       },
     },
@@ -187,7 +206,9 @@ const getPlaylistById = asyncHandler(async (req, res) => {
           email: 1,
           avatar: 1,
           fullName: 1,
+          _id: 1,
         },
+        isOwner: 1,
       },
     },
   ]);
@@ -220,7 +241,10 @@ const addVideoToPlaylist = asyncHandler(async (req, res) => {
   }
   // Check is owner adding video to the playlist
   if (playlist.owner.toString() !== req.user?._id.toString()) {
-    throw new ApiError(403, "Only Owner Can Add Video to their playlist");
+    throw new ApiError(
+      403,
+      "Unauthorized: you are not authorized to update this playlist"
+    );
   }
 
   const video = await Video.findById(videoId);
@@ -258,7 +282,7 @@ const addVideoToPlaylist = asyncHandler(async (req, res) => {
 // REMOVE VIDEO FROM PLAYLIST CONTROLLER(BY OWNER)
 const removeVideoFromPlaylist = asyncHandler(async (req, res) => {
   const { playlistId, videoId } = req.params;
-  // TODO: remove video from playlist
+
   if (!isValidObjectId(playlistId) || !isValidObjectId(videoId)) {
     throw new ApiError(400, "Playlist Id or Video Id is invaild");
   }
@@ -269,7 +293,10 @@ const removeVideoFromPlaylist = asyncHandler(async (req, res) => {
   }
 
   if (playlist.owner.toString() !== req.user?._id.toString()) {
-    throw new ApiError(409, "Only Owner can remove video from this playlist");
+    throw new ApiError(
+      403,
+      "Unauthorized: you are not authorized to remove video from this playlist"
+    );
   }
 
   const video = await Video.findById(videoId);
@@ -302,11 +329,14 @@ const deletePlaylist = asyncHandler(async (req, res) => {
   const playlist = await Playlist.findById(playlistId);
 
   if (!playlist) {
-    throw new ApiError(500, "Playlist is not found");
+    throw new ApiError(404, "Playlist is not found");
   }
 
   if (playlist.owner.toString() !== req.user?._id.toString()) {
-    throw new ApiError(403, "Only Owner can delete this playlist");
+    throw new ApiError(
+      403,
+      "Unauthorized: you are not authorized to delete this playlist"
+    );
   }
 
   await Playlist.findByIdAndDelete(playlist?._id);
@@ -336,7 +366,7 @@ const updatePlaylist = asyncHandler(async (req, res) => {
   if (playlist.owner.toString() !== req.user?._id.toString()) {
     throw new ApiError(
       403,
-      "You are not allowed to update this playlist because you are not the owner."
+      "Unauthorized: you are not authorized to update this playlist"
     );
   }
 
